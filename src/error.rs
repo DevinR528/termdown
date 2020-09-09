@@ -15,6 +15,9 @@ pub enum Error {
     Utf8Error(#[from] std::string::FromUtf8Error),
 
     #[error("{0}")]
+    Unmatched(String),
+
+    #[error("{0}")]
     Custom(Box<dyn std::error::Error>),
 }
 

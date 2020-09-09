@@ -1,17 +1,11 @@
 use pulldown_cmark::{Options, Parser};
-use syntect::{
-    easy::HighlightLines,
-    highlighting::{FontStyle, Style, Theme, ThemeSet},
-    parsing::SyntaxSet,
-    util::LinesWithEndings,
-};
 
 mod code_block;
 mod error;
 mod md_parse;
 
-use code_block::{get_theme, write_as_ansi};
 pub use error::{Error, Result};
+pub use md_parse::StateStack;
 
 pub fn markdown_terminal(input: &str) -> Result<String> {
     let mut options = Options::empty();
@@ -20,8 +14,9 @@ pub fn markdown_terminal(input: &str) -> Result<String> {
 
     let parser = Parser::new_ext(&input, options);
     let mut escaped = vec![];
+    let mut state = StateStack::default();
     for event in parser {
-        md_parse::proccess_event(&mut escaped, event, get_theme())?;
+        state = md_parse::process_event(&mut escaped, event, state)?;
     }
 
     // clear formatting
@@ -39,9 +34,22 @@ mod tests {
             super::markdown_terminal(&std::fs::read_to_string("./test_data/code.md").unwrap(),)
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn second() {
         println!(
             "{}",
             super::markdown_terminal("```rust\nfn heap_size_of_children(&self) -> usize;\n```")
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn third() {
+        println!(
+            "{}",
+            super::markdown_terminal(&std::fs::read_to_string("./test_data/links.md").unwrap(),)
                 .unwrap()
         );
     }

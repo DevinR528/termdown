@@ -11,10 +11,43 @@ use std::sync::Once;
 
 use crate::error::Result;
 
-static INIT: Once = Once::new();
+static INIT_THEME: Once = Once::new();
+static INIT_SYNTAX: Once = Once::new();
 static mut THEME: Option<Theme> = None;
 static mut SYNTAX: Option<SyntaxSet> = None;
 
+/// We avoid loading the entire ThemeSet binary every time we want to convert some code
+/// to ansi escaped text.
+///
+/// We use a static mut, `THEME` to hold a syntax set that will define how the tokens are colored.
+pub(crate) fn get_theme<'a>() -> &'a Theme {
+    unsafe {
+        INIT_THEME.call_once(|| {
+            let mut ts = ThemeSet::load_defaults();
+            THEME = ts.themes.remove("Solarized (dark)");
+        });
+        THEME.as_ref().unwrap()
+    }
+}
+
+/// The `SyntaxSet` defines the tokens that are possible.
+///
+/// A static mut is used to avoid parsing and storing the binary file and resulting struct every
+/// time `markdown_terminal` is called.
+pub(crate) fn get_syntax<'a>(token: &str) -> &'a SyntaxReference {
+    unsafe {
+        INIT_SYNTAX.call_once(|| {
+            SYNTAX = Some(SyntaxSet::load_defaults_newlines());
+        });
+        SYNTAX
+            .as_ref()
+            .unwrap()
+            .find_syntax_by_token(token)
+            .unwrap_or_else(|| SYNTAX.as_ref().unwrap().find_syntax_plain_text())
+    }
+}
+
+// TODO re-write
 /// Write regions as ANSI 8-bit coloured text.
 ///
 /// We use this function to simplify syntax highlighting to 8-bit ANSI values
@@ -70,37 +103,6 @@ pub(crate) fn write_as_ansi<'a, W: Write, I: Iterator<Item = (Style, &'a str)>>(
     Ok(())
 }
 
-/// We avoid loading the entire ThemeSet binary every time we want to convert some code
-/// to ansi escaped text.
-///
-/// We use a static mut, `THEME` to hold a syntax set that will define how the tokens are colored.
-pub(crate) fn get_theme<'a>() -> &'a Theme {
-    unsafe {
-        INIT.call_once(|| {
-            let mut ts = ThemeSet::load_defaults();
-            THEME = ts.themes.remove("Solarized (dark)");
-        });
-        THEME.as_ref().unwrap()
-    }
-}
-
-/// The `SyntaxSet` defines the tokens that are possible.
-///
-/// A static mut is used to avoid parsing and storing the binary file and resulting struct every
-/// time `markdown_terminal` is called.
-pub(crate) fn get_syntax<'a>(token: &str) -> &'a SyntaxReference {
-    unsafe {
-        INIT.call_once(|| {
-            SYNTAX = Some(SyntaxSet::load_defaults_newlines());
-        });
-        SYNTAX
-            .as_ref()
-            .unwrap()
-            .find_syntax_by_token(token)
-            .unwrap_or_else(|| SYNTAX.as_ref().unwrap().find_syntax_plain_text())
-    }
-}
-
 pub fn codeblock_ansi<W: Write>(input: &str, lang: &str, writer: &mut W) -> Result<()> {
     let ps = SyntaxSet::load_defaults_newlines();
     let syntax = get_syntax(lang);
@@ -126,7 +128,7 @@ mod tests {
         String::from_utf8(out).unwrap()
     }
     #[test]
-    fn it_works() {
+    fn code_blocks() {
         println!(
             "{}",
             block(
