@@ -1,28 +1,14 @@
 use ansi_term::{Colour, Style};
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Tag};
 
-// const OSC: &str = "\x1B[";
-// const BEL: &str = "7";
-// const SEP: &str = ";";
-
-// write_osc(writer, &format!("8;;{}", destination))
-
-fn link(text: &str, url: &str) -> String {
-    // [OSC, "8", SEP, SEP, url, BEL, text, OSC, "8", SEP, SEP, BEL].join("")
-    // format!("[{}]: {}8{}{}{}", text, OSC, SEP, SEP, url)
-    format!("{} ({})", text, url)
-}
-
-// pub fn write_rule<W: std::io::Write>(writer: &mut W, length: usize) -> Result<()> {
-//     let rule = "\u{2550}".repeat(length);
-//     let style = Style::new().fg(Colour::Green);
-//     write_styled(writer, &style, rule)
-// }
-
 use crate::{
     code_block::codeblock_ansi,
     error::{Error, Result},
 };
+
+fn link(text: &str, url: &str) -> String {
+    format!("{} ({})", text, url)
+}
 
 #[derive(Clone, Debug)]
 pub enum State<'a> {
@@ -55,44 +41,25 @@ pub enum State<'a> {
         style: Style,
         level: u32,
     },
+    BlockQuote {
+        style: Style,
+    },
 }
 
-// #[allow(unused)]
-// #[derive(Clone, Debug)]
-// pub enum StateText<'a> {
-//     Link {
-//         style: Style,
-//         body: CowStr<'a>,
-//     },
-//     Text {
-//         body: CowStr<'a>,
-//     },
-//     Strong {
-//         style: Style,
-//         body: CowStr<'a>,
-//     },
-//     Emphasis {
-//         style: Style,
-//         body: CowStr<'a>,
-//     },
-//     Paragraph {
-//         style: Style,
-//         body: CowStr<'a>,
-//     },
-//     Code {
-//         lang: &'a Option<CowStr<'a>>,
-//         body: CowStr<'a>,
-//         indented: bool,
-//     },
-//     List {
-//         style: Style,
-//         body: CowStr<'a>,
-//     },
-//     ListItem {
-//         style: Style,
-//         body: CowStr<'a>,
-//     },
-// }
+impl<'a> State<'a> {
+    pub fn style(&self) -> Option<Style> {
+        Some(match self {
+            State::Emphasis { style, .. } => *style,
+            State::Strong { style, .. } => *style,
+            State::Paragraph { style, .. } => *style,
+            State::Link { style, .. } => *style,
+            State::List { style, .. } => *style,
+            State::ListItem { style, .. } => *style,
+            State::BlockQuote { style, .. } => *style,
+            _ => None?,
+        })
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct StateStack<'a> {
@@ -124,7 +91,14 @@ impl<'a> StateStack<'a> {
                 style: Style::new().italic(),
             }),
             Tag::Paragraph => self.stack.push(State::Paragraph {
-                style: Style::new(),
+                // TODO is this how this works?
+                // Inherit the style of the parent tag
+                style: self
+                    .stack
+                    .iter()
+                    .rev()
+                    .find_map(|state| state.style())
+                    .unwrap_or_else(Style::new),
             }),
             Tag::List(first) => self.stack.push(State::List {
                 first,
@@ -138,6 +112,9 @@ impl<'a> StateStack<'a> {
                 style: Style::new().bold(),
                 level,
             }),
+            Tag::BlockQuote => self.stack.push(State::BlockQuote {
+                style: Style::new().fg(Colour::Green),
+            }),
             ev => println!("{:?}", ev),
         }
     }
@@ -150,6 +127,7 @@ impl<'a> StateStack<'a> {
             | (Tag::Link(_, _, _), Some(State::Link { .. }))
             | (Tag::List(_), Some(State::List { .. }))
             | (Tag::Item, Some(State::ListItem { .. }))
+            | (Tag::BlockQuote, Some(State::BlockQuote { .. }))
             | (Tag::CodeBlock(_), Some(State::Code { .. })) => Ok(()),
             (t, s) => {
                 println!("tag: {:?} state: {:?}", t, s);
@@ -179,6 +157,7 @@ pub fn process_event<'a, W: std::io::Write>(
     event: Event<'a>,
     mut state: StateStack<'a>,
 ) -> Result<StateStack<'a>> {
+    println!("{:?}", event);
     match event {
         // A list is always rendered with "\n\n" before the items
         Event::Start(tag) if matches!(tag, Tag::List(_)) => {
@@ -209,6 +188,7 @@ pub fn write_terminal<W: std::io::Write>(
     match state {
         State::Strong { style } => write_styled(writer, style, body),
         State::Emphasis { style } => write_styled(writer, style, body),
+        State::BlockQuote { style } => write_styled(writer, style, body),
         State::Paragraph { style } => write_styled(writer, style, body),
         State::List { .. } => Ok(()), // do nothing this is handled by `process_event`
         State::ListItem { style } => write_styled(writer, style, format!(" * {}\n", body)),
@@ -218,7 +198,7 @@ pub fn write_terminal<W: std::io::Write>(
             style,
             url,
             title: _,
-        } => write_styled(writer, style, link(&body, url)).map_err(Into::into),
+        } => write_styled(writer, style, link(&body, url)),
         State::Code { lang, indented: _ } => {
             if let Some(lang) = lang {
                 codeblock_ansi(&body, lang, writer).map_err(Into::into)

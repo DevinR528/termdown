@@ -53,4 +53,13 @@ mod tests {
                 .unwrap()
         );
     }
+
+    #[test]
+    fn reply_md() {
+        println!(
+            "{}",
+            super::markdown_terminal(&std::fs::read_to_string("./test_data/reply.md").unwrap(),)
+                .unwrap()
+        );
+    }
 }
